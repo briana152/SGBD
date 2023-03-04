@@ -1,0 +1,412 @@
+------------EX6--------
+----pentru un magazin al carei tara este data vrem sa afisam pentru fiecare curier
+----ce masini conduc:
+
+CREATE OR REPLACE PROCEDURE Ex6 (tara MAGAZIN.tara_magazin%TYPE)
+AS 
+    TYPE tabel_idx IS TABLE OF masina%rowtype INDEX BY PLS_INTEGER;
+    masini tabel_idx;
+    
+    TYPE angajat_rec is RECORD(
+    id_angajat angajat.id_angajat%TYPE,
+    id_magazin angajat.id_magazin%TYPE,
+    nume angajat.nume_angajat%TYPE,
+    prenume angajat.prenume_angajat%TYPE,
+    functie angajat.functie%TYPE);
+    
+    TYPE my_nested_table IS TABLE OF angajat_rec;
+    angajati my_nested_table := my_nested_table();
+
+    numar NUMBER(6);
+    numar1 NUMBER(6);
+    
+BEGIN
+    
+    SELECT COUNT(*)
+    INTO numar
+    FROM angajat 
+    WHERE functie = 'curier';
+    
+    angajati.extend(numar + 1);
+    
+    SELECT a.id_angajat,a.id_magazin, a.nume_angajat, a.prenume_angajat, a.functie
+    BULK COLLECT INTO angajati
+    FROM angajat a, magazin s
+    WHERE a.functie = 'curier' and a.id_magazin=s.id_magazin
+    AND UPPER(s.tara_magazin) LIKE  UPPER(tara);
+    
+    FOR i IN angajati.first..angajati.last LOOP
+        DBMS_OUTPUT.PUT_LINE('Curierul '||angajati(i).nume||' conduce urm masini:');
+        
+        SELECT COUNT(*)
+        INTO numar1
+        FROM masina m
+        WHERE m.id_curier = angajati(i).id_angajat;
+        
+        IF numar1 = 0 THEN
+            DBMS_OUTPUT.PUT_LINE('nu are inca masina');
+        END IF;
+        
+        IF numar1 > 0 THEN 
+            SELECT *
+            BULK COLLECT INTO masini
+            FROM masina m
+            WHERE m.id_curier = angajati(i).id_angajat;
+            
+            FOR j IN 1..numar1 LOOP
+                DBMS_OUTPUT.PUT_LINE(j||'. '||masini(j).marca_masina||' '||masini(j).tip_masina||' '||masini(j).nr_matricol);
+            END LOOP;
+        END IF;
+    END LOOP;
+    
+    
+END;
+/
+
+BEGIN
+    Ex6('romania');
+END;
+/            
+
+
+
+
+------------EX7--------
+----sa se afiseze pentru fiecare magazin angajatii care au peste varsta data
+----daca nu exista angajati care sa aibe peste varsta respectiva se afiseaza un mesaj
+
+
+CREATE OR REPLACE PROCEDURE Ex7 (age angajat.varsta_angajat%TYPE)
+AS 
+    CURSOR magazine IS
+        SELECT tara_magazin, id_magazin
+        FROM MAGAZIN;
+        
+    m magazine%ROWTYPE;
+    
+    CURSOR angajati(id_m MAGAZIN.ID_MAGAZIN%TYPE) IS
+                SELECT nume_angajat, prenume_angajat, functie
+                FROM ANGAJAT a
+                WHERE a.varsta_angajat >= age AND a.id_magazin = id_m;
+                
+    a angajati%ROWTYPE;
+    numar NUMBER(6);
+    
+BEGIN
+
+    FOR m in magazine LOOP
+        DBMS_OUTPUT.PUT_LINE( 'Magazinul din ' || m.tara_magazin);
+        DBMS_OUTPUT.PUT_LINE('------------------------');
+        
+        UPDATE angajat 
+        SET varsta_angajat = varsta_angajat + 0
+        WHERE angajat.varsta_angajat >= age and angajat.id_magazin = m.id_magazin;
+        
+        if SQL%FOUND THEN
+        
+        FOR a in angajati(m.id_magazin) LOOP
+            DBMS_OUTPUT.PUT_LINE( a.nume_angajat || ' ' || a.prenume_angajat || ' ' || a.functie);
+            END LOOP;
+            
+        ELSE DBMS_OUTPUT.PUT_LINE('Nu s-a gasit niciun angajat.');
+        
+        END IF;
+        DBMS_OUTPUT.NEW_LINE;
+        DBMS_OUTPUT.NEW_LINE;
+        
+    END LOOP;
+END;
+/
+
+BEGIN
+    Ex7(100);
+    Ex7(30);
+END;
+/
+
+
+
+--------EX8-------------
+-------pentru o tara si o marca data sa se afiseze cati curieri care lucreaza
+-------pt magazinul din tara data conduc o masina de marca respectiva
+
+
+
+CREATE OR REPLACE FUNCTION Ex8(tara magazin.tara_magazin%TYPE, marca masina.marca_masina%TYPE) RETURN NUMBER 
+IS 
+    nr_curieri NUMBER;
+    TYPE tab1 is table of magazin%ROWTYPE INDEX BY PLS_INTEGER;
+    t tab1;
+    TYPE tab2 is table of masina%ROWTYPE INDEX BY PLS_INTEGER;
+    m tab2;
+    --exceptii
+    TARA_DOESNT_EXIST EXCEPTION;
+    MARCA_DOESNT_EXIST EXCEPTION;
+    NO_DATA_FOUND EXCEPTION;
+
+BEGIN 
+    
+    SELECT *
+    BULK COLLECT INTO t
+    FROM magazin m
+    WHERE upper(m.tara_magazin) like upper(tara);
+    
+    IF SQL%NOTFOUND THEN
+        RAISE MARCA_DOESNT_EXIST;
+    END IF;
+    
+    SELECT *
+    BULK COLLECT INTO m
+    FROM masina m
+    WHERE upper(m.marca_masina) like upper(marca);
+    
+    IF SQL%NOTFOUND THEN
+        RAISE MARCA_DOESNT_EXIST;
+    END IF;
+    
+    select count(nume_angajat)
+    into nr_curieri
+    from angajat a
+    join magazin m on a.id_magazin = m.id_magazin
+    join masina n on n.id_curier = a.id_angajat
+    where upper(m.tara_magazin) like upper(tara) and upper(n.marca_masina) like upper(marca);
+    
+    IF nr_curieri = 0  THEN
+        RAISE NO_DATA_FOUND;
+    ELSE RETURN nr_curieri;
+    END IF;
+    
+    EXCEPTION
+        WHEN TARA_DOESNT_EXIST THEN
+            DBMS_OUTPUT.PUT_LINE('Nu sunt magazine in tara respectiva');
+            RETURN -1;
+        WHEN MARCA_DOESNT_EXIST THEN
+            DBMS_OUTPUT.PUT_LINE('Niciun magazin nu are masini cu marca respectiva');
+            RETURN -1;
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('Nu s-au gasit curieri din tara respectiva care sa conduca masini de marca respectiva');
+            RETURN -1;
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Codul de eroare: '  || SQLCODE);
+            DBMS_OUTPUT.PUT_LINE('Mesajul erorii: ' || SQLERRM); 
+            RETURN -1;
+END;
+/
+
+
+DECLARE 
+    numar NUMBER;
+BEGIN
+    numar := Ex8('japonia','toyota');
+    IF numar > -1 THEN
+        DBMS_OUTPUT.PUT_LINE('Rezultatul este:  ' || numar );
+    END IF;
+    numar := Ex8('germania','toyota');
+    numar := Ex8('sdvdvdv','toyota');
+    numar := Ex8('germania','sdcdscs');
+END;
+
+
+
+INSERT INTO COMANDA VALUES
+(1177,3,2,111,1,TO_DATE('20220302', 'yyyymmdd'),TO_DATE('20220314', 'yyyymmdd'),3,76.09,56789,54,'euro','livrata','Std Stefan cel Mare nr 45, Bacau');
+select * from client;
+select * from comanda;
+
+----------EX9-------------
+---------pentru un nume dat si o data sa se afiseze numele si prenumele clientului, data plasarii, magazinul, curierul si nr matricol al masinii
+---------de comanda plasata la data respectiva de catre clientul respectiv
+
+CREATE OR REPLACE PROCEDURE Ex9(nume client.nume_client%type, prenume client.prenume_client%type, data comanda.data_plasare%type)
+AS 
+    TYPE table1 IS TABLE OF client%rowtype INDEX BY PLS_INTEGER;
+    tab1 table1;
+    TYPE table2 IS TABLE OF comanda%rowtype INDEX BY PLS_INTEGER;
+    tab2 table2;
+    TYPE table3 IS TABLE OF comanda.id_comanda%type INDEX BY PLS_INTEGER;
+    tab3 table3;
+    
+    CURSOR comanda_detalii is
+        select nume_client, prenume_client, data_plasare, tara_magazin, nume_angajat, prenume_angajat, nr_matricol
+        from comanda co
+        join client cl on (co.id_client = cl.id_client)
+        join magazin m on (co.id_magazin = m.id_magazin)
+        join angajat a on (co.id_curier = a.id_angajat)
+        join masina ms on (co.id_masina = ms.id_masina);
+    
+    temp comanda_detalii%rowtype;
+    
+    NO_DATA_FOUND1 EXCEPTION;
+    NO_DATA_FOUND2 EXCEPTION;
+    NO_DATA_FOUND3 EXCEPTION;
+    TOO_MANY_ROWS1 EXCEPTION;
+    TOO_MANY_ROWS2 EXCEPTION;
+    
+BEGIN
+    SELECT *
+    BULK COLLECT INTO tab1
+    FROM client c
+    WHERE UPPER(c.nume_client) = UPPER(nume) AND UPPER(c.prenume_client) = UPPER(prenume);
+    
+    IF SQL%NOTFOUND THEN
+        RAISE NO_DATA_FOUND1;
+    END IF;
+    
+    IF tab1.count >= 2 THEN
+        RAISE TOO_MANY_ROWS1;
+    END IF;
+    
+    SELECT *
+    BULK COLLECT INTO tab2
+    FROM comanda c
+    WHERE c.data_plasare = data;
+    
+    IF SQL%NOTFOUND THEN
+        RAISE NO_DATA_FOUND2;
+    END IF;
+    
+    SELECT id_comanda
+    BULK COLLECT INTO tab3
+    FROM comanda c
+    JOIN client cl ON (c.id_client = cl.id_client)
+    WHERE c.data_plasare = data AND UPPER(cl.nume_client) = UPPER(nume) AND UPPER(cl.prenume_client) = UPPER(prenume);
+    
+    IF SQL%NOTFOUND THEN
+        RAISE NO_DATA_FOUND3;
+    END IF;
+    
+    IF tab3.count >= 2 THEN
+        RAISE TOO_MANY_ROWS2;
+    END IF;
+    
+    select nume_client, prenume_client, data_plasare, tara_magazin, nume_angajat, prenume_angajat, nr_matricol
+    into temp
+    from comanda co
+    join client cl on (co.id_client = cl.id_client)
+    join magazin m on (co.id_magazin = m.id_magazin)
+    join angajat a on (co.id_curier = a.id_angajat)
+    join masina ms on (co.id_masina = ms.id_masina)
+    where upper(cl.nume_client) like upper(nume) and upper(cl.prenume_client) like upper(prenume) and co.data_plasare = data;
+    
+    IF SQL%NOTFOUND THEN
+        RAISE NO_DATA_FOUND3;
+    END IF;
+
+    
+   
+    DBMS_OUTPUT.PUT_LINE(temp.nume_client|| ' ' || temp.prenume_client || ' ' || temp.data_plasare || ' ' || temp.tara_magazin || ' ' || temp.nume_angajat || ' ' || temp.prenume_angajat || ' ' || temp.nr_matricol);
+   
+    
+    EXCEPTION
+        WHEN NO_DATA_FOUND1 THEN
+            DBMS_OUTPUT.PUT_LINE('Nu exista clienti care sa aiba acest nume!');
+        WHEN NO_DATA_FOUND2 THEN
+            DBMS_OUTPUT.PUT_LINE('Nu s-a plasat nicio comanda la aceasta data!');
+        WHEN NO_DATA_FOUND3 THEN
+            DBMS_OUTPUT.PUT_LINE('Clientul acesta nu a plasat nicio comanda la data data!');
+        WHEN TOO_MANY_ROWS1 THEN
+            DBMS_OUTPUT.PUT_LINE('Exista mai multi clienti cu acest nume!');
+        WHEN TOO_MANY_ROWS2 THEN
+            DBMS_OUTPUT.PUT_LINE('Clientul acesta a plasat mai multe comenzi la data respectiva!');
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('Codul de eroare: '  || SQLCODE);
+            DBMS_OUTPUT.PUT_LINE('Mesajul erorii: ' || SQLERRM); 
+END;
+/
+BEGIN
+    Ex9('gvhgv','Robert','19-JUN-22');
+    Ex9('Mihaila','Robert','22-JUN-22');
+    Ex9('Mihaila','Robert','19-JUN-22');
+    Ex9('Mihaila','Robert','23-APR-22');
+    Ex9('Mihaila','Robert','02-MAR-22');
+END;
+/
+
+
+----------EX10------
+------Trigger care nu permite actualizarea tabelului REDUCERE
+------decat de la 8:00 pana la 21:00, de luni pana sambata
+
+CREATE OR REPLACE TRIGGER Ex10
+ BEFORE INSERT OR UPDATE OR DELETE ON reducere
+BEGIN
+IF (TO_CHAR(SYSDATE,'D') = 1) OR (TO_CHAR(SYSDATE,'HH24') NOT BETWEEN 8 AND 20)
+THEN
+RAISE_APPLICATION_ERROR(-20001,'Tabelul REDUCERE nu poate fi actualizat momentan');
+END IF;
+END;
+/
+DROP TRIGGER Ex10;
+
+
+
+INSERT INTO COMANDA VALUES
+(9999,3,2,111,1,TO_DATE('20220302', 'yyyymmdd'),TO_DATE('20220314', 'yyyymmdd'),3,76.09,56789,54,'euro','livrata','Std Stefan cel Mare nr 45, Bacau');
+
+select * from comanda;
+
+INSERT INTO DETALII_COMANDA VALUES
+(999,9999,1118,1);
+
+select * from detalii_comanda;
+
+-----------EX11-----------
+------Trigger care sterge automat toate randurile din tabelul detalii_comanda
+------care au legatura cu o comanda stearsa din bd
+
+
+CREATE OR REPLACE TRIGGER Ex11
+AFTER DELETE ON comanda FOR EACH ROW
+declare
+    id_temp number;
+begin
+    id_temp := :OLD.id_comanda;
+    delete from detalii_comanda where id_comanda = id_temp;
+END;
+
+DELETE FROM comanda WHERE id_comanda = 9999; 
+select * from comanda;
+select * from detalii_comanda;
+
+
+
+
+
+---------------EX12-------------
+-------Trigger de tip LDD care se declanseaza de fiecare data cand se executa operatii 
+-------ALTER, DROP SAU CREATE
+-------pentru a testa daca merge vom stoca informatiile intr-un tabel separat
+
+CREATE TABLE LDD_info(  utilizator VARCHAR2(50),
+                        baza_de_date VARCHAR2(50),
+                        eveniment VARCHAR2(50),
+                        nume_obj VARCHAR2(50),
+                        tip_obj VARCHAR2(50),
+                        data_realizare DATE
+                     );
+SELECT * FROM LDD_info;
+
+CREATE OR REPLACE TRIGGER Ex12
+    AFTER CREATE OR ALTER OR DROP ON SCHEMA
+BEGIN
+    INSERT INTO LDD_info 
+    VALUES(SYS.LOGIN_USER, SYS.DATABASE_NAME, SYS.SYSEVENT, SYS.DICTIONARY_OBJ_NAME, SYS.DICTIONARY_OBJ_TYPE, SYSDATE);
+END;
+/
+
+CREATE TABLE LOCUINTE ( id_locuinta NUMBER(6) CONSTRAINT id_locuinta_pk PRIMARY KEY,
+                        nume_proprietar VARCHAR2(100),
+                        oras VARCHAR2(100)
+                      );
+                      
+select * from LOCUINTE; 
+
+ALTER TABLE LOCUINTE 
+ADD (prenume_proprietar VARCHAR2(100));
+
+ALTER TABLE LOCUINTE
+DROP COLUMN prenume_proprietar;
+
+DROP TABLE LOCUINTE;
+
+SELECT * FROM LDD_info;
